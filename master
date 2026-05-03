@@ -1,1 +1,93 @@
+import streamlit as st
+import pandas as pd
+import requests
+import json
+from datetime import datetime
+import time
+import os
 
+st.set_page_config(page_title="Discogs Value Tracker", layout="wide")
+st.title("🎵 Discogs Value Tracker")
+st.markdown("Monitor your collection value changes daily")
+
+DATA_FILE = "discogs_collection_history.json"
+
+with st.sidebar:
+    st.header("Settings")
+    token = st.text_input("Discogs Personal Access Token", type="password")
+    username = st.text_input("Your Discogs Username")
+    
+    if st.button("Fetch / Update Collection Data", type="primary"):
+        if not token or not username:
+            st.error("Please enter both token and username")
+        else:
+            with st.spinner("Connecting to Discogs..."):
+                result = fetch_and_process_collection(token, username)
+                if result:
+                    save_data(result)
+                    st.success(f"Success! Updated {len(result['items'])} records.")
+                    st.rerun()
+
+# Load existing data
+if os.path.exists(DATA_FILE):
+    try:
+        with open(DATA_FILE, 'r') as f:
+            history = json.load(f)
+        
+        df = pd.DataFrame(history['items'])
+        if 'current_median' in df.columns:
+            df = df.sort_values(by='current_median', ascending=False)
+        
+        st.header(f"Collection Overview - {history['last_updated']}")
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total Median Value", f"${history.get('total_median', 0):,.2f}")
+        col2.metric("Records", len(df))
+        col3.metric("Last Updated", history['last_updated'])
+        
+        st.subheader("Records by Value (Highest First)")
+        st.dataframe(df, use_container_width=True)
+        
+        csv = df.to_csv(index=False)
+        st.download_button("Export to CSV", csv, f"discogs_{datetime.now().date()}.csv", "text/csv")
+        
+    except Exception as e:
+        st.error(f"Error loading data: {e}")
+else:
+    st.info("Enter your token + username on the left and click the button to start.")
+
+# ================== FUNCTIONS ==================
+def fetch_and_process_collection(token, username):
+    headers = {
+        'Authorization': f'Discogs token={token}',
+        'User-Agent': 'DiscogsValueTracker/1.0 +https://github.com'
+    }
+    
+    try:
+        # Test connection first
+        test = requests.get("https://api.discogs.com", headers=headers, timeout=10)
+        if test.status_code != 200:
+            st.error(f"Connection failed: {test.status_code} - Check your token")
+            return None
+            
+        st.success("Connected to Discogs successfully!")
+        
+        # (Rest of the fetching code - simplified for now)
+        st.info("Full fetching coming in next update. Token is working.")
+        return {
+            'last_updated': datetime.now().strftime("%Y-%m-%d %H:%M"),
+            'total_median': 0,
+            'items': [],
+            'history': []
+        }
+        
+    except requests.exceptions.ConnectionError:
+        st.error("❌ Connection Error - Are you connected to the internet?")
+        return None
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+        return None
+
+def save_data(data):
+    with open(DATA_FILE, 'w') as f:
+        json.dump(data, f, indent=2)
